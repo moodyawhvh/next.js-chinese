@@ -1,0 +1,608 @@
+---
+title: 服务端组件与客户端组件
+description: 学习如何使用 React 服务端组件与客户端组件,把应用的各个部分渲染在服务端或客户端。
+related:
+  title: 下一步
+  description: 进一步了解本页提到的 API。
+  links:
+    - app/api-reference/directives/use-client
+    - app/guides/server-and-client-boundary
+---
+
+> 🌐 本文档由 [vercel/next.js](https://github.com/vercel/next.js) 翻译,英文原版见原项目。
+>
+> 注:本文件超过 10000 字符,按约定聚焦核心章节翻译;所有示例代码保持原样。
+
+默认情况下,布局和页面都是[服务端组件](https://react.dev/reference/rsc/server-components),让你可以在服务端取数并渲染部分 UI,可选地缓存结果,再流式传输给客户端。当需要交互能力或浏览器 API 时,可以用[客户端组件](https://react.dev/reference/rsc/use-client)叠加实现。
+
+本页讲解服务端组件与客户端组件在 Next.js 中的工作方式和适用时机,并示范如何在应用中组合使用。
+
+> **须知:**关于每类组件的运行位置以及边界机制的解释,参见[服务端与客户端边界](/docs/app/guides/server-and-client-boundary)。
+
+## 何时使用服务端组件与客户端组件?
+
+客户端与服务端环境能力不同。服务端组件与客户端组件让你按用例把逻辑放到合适的环境运行。
+
+以下情况使用**客户端组件**:
+
+- 需要[状态](https://react.dev/learn/managing-state)与[事件处理器](https://react.dev/learn/responding-to-events),如 `onClick`、`onChange`。
+- 需要[生命周期逻辑](https://react.dev/learn/lifecycle-of-reactive-effects),如 `useEffect`。
+- 需要仅浏览器可用的 API,如 `localStorage`、`window`、`navigator.geolocation` 等。
+- 需要[自定义 hooks](https://react.dev/learn/reusing-logic-with-custom-hooks)。
+
+以下情况使用**服务端组件**:
+
+- 在靠近数据源的位置从数据库或 API 取数。
+- 使用 API 密钥、令牌等机密信息而不暴露给客户端。
+- 减少发送到浏览器的 JavaScript 体积。
+- 改善[首次内容绘制(FCP)](https://web.dev/fcp/),并向客户端渐进式地流式传输内容。
+
+例如,`<Page>` 组件是服务端组件,负责获取博文数据,并把它作为 props 传给处理客户端交互的 `<LikeButton>`。
+
+```tsx filename="app/[id]/page.tsx" highlight={1,17} switcher
+import LikeButton from '@/app/ui/like-button'
+import { getPost } from '@/lib/data'
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const post = await getPost(id)
+
+  return (
+    <div>
+      <main>
+        <h1>{post.title}</h1>
+        {/* ... */}
+        <LikeButton likes={post.likes} />
+      </main>
+    </div>
+  )
+}
+```
+
+```jsx filename="app/[id]/page.js" highlight={1,13} switcher
+import LikeButton from '@/app/ui/like-button'
+import { getPost } from '@/lib/data'
+
+export default async function Page({ params }) {
+  const { id } = await params
+  const post = await getPost(id)
+
+  return (
+    <div>
+      <main>
+        <h1>{post.title}</h1>
+        {/* ... */}
+        <LikeButton likes={post.likes} />
+      </main>
+    </div>
+  )
+}
+```
+
+```tsx filename="app/ui/like-button.tsx" highlight={1} switcher
+'use client'
+
+import { useState } from 'react'
+
+export default function LikeButton({ likes }: { likes: number }) {
+  // ...
+}
+```
+
+```jsx filename="app/ui/like-button.js" highlight={1} switcher
+'use client'
+
+import { useState } from 'react'
+
+export default function LikeButton({ likes }) {
+  // ...
+}
+```
+
+## 服务端组件与客户端组件在 Next.js 中如何工作?
+
+### 在服务端
+
+在服务端,Next.js 使用 React 的 API 编排渲染。渲染工作按单个路由片段([布局与页面](/docs/app/getting-started/layouts-and-pages))切分,包括[并行路由插槽](/docs/app/api-reference/file-conventions/parallel-routes)(无论其是否展示):
+
+- **服务端组件**被渲染成一种称为 React 服务端组件负载(RSC Payload)的特殊数据格式。
+- **客户端组件**与 RSC Payload 一起用于[预渲染](/docs/app/glossary#prerendering) HTML。
+
+> **什么是 React 服务端组件负载(RSC Payload)?**
+>
+> RSC Payload 是渲染后的 React 服务端组件树的紧凑序列化表示。React 在客户端用它更新浏览器 DOM。RSC Payload 包含:
+>
+> - 服务端组件的渲染结果
+> - 客户端组件应渲染位置的占位符,以及对其 JavaScript 文件的引用
+> - 从服务端组件传给客户端组件的所有 props
+
+### 在客户端(首次加载)
+
+接着,在客户端:
+
+1. **HTML** 用于立即向用户展示路由的快速非交互预览。
+2. **RSC Payload** 用于调和客户端与服务端组件树。
+3. **JavaScript** 用于水合客户端组件,让应用可交互。
+
+> **什么是水合(Hydration)?**
+>
+> 水合是 React 把[事件处理器](https://react.dev/learn/responding-to-events)挂载到 DOM、让静态 HTML 变为可交互的过程。
+
+### 后续导航
+
+在后续导航中:
+
+- **RSC Payload** 会被预取并缓存,实现即时导航。
+- **客户端组件**完全在客户端渲染,不再依赖服务端渲染的 HTML。
+
+## 示例
+
+### 使用客户端组件
+
+在文件顶部、导入语句之上添加 [`"use client"`](https://react.dev/reference/rsc/use-client) 指令,即可创建客户端组件。
+
+```tsx filename="app/ui/counter.tsx" highlight={1} switcher
+'use client'
+
+import { useState } from 'react'
+
+export default function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <div>
+      <p>{count} likes</p>
+      <button onClick={() => setCount(count + 1)}>Click me</button>
+    </div>
+  )
+}
+```
+
+```jsx filename="app/ui/counter.js" highlight={1} switcher
+'use client'
+
+import { useState } from 'react'
+
+export default function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <div>
+      <p>{count} likes</p>
+      <button onClick={() => setCount(count + 1)}>Click me</button>
+    </div>
+  )
+}
+```
+
+`"use client"` 用于声明服务端与客户端模块图(树)之间的**边界**。
+
+一旦某个文件标记了 `"use client"`,**它的所有导入以及它直接渲染的组件都会进入客户端包**。这意味着你不需要给每个面向客户端的组件都加指令。
+
+该行为作用于客户端组件[模块图](/docs/app/glossary#module-graph)内的组件,包括它导入的模块和直接渲染的组件。但不适用于作为 children 或其他 props 传入的服务端组件——那些组件并不在客户端组件的模块图中,它们在服务端渲染后以渲染结果的形式传给客户端组件。
+
+服务端组件与客户端组件如何组合,参见[交错使用服务端与客户端组件](/docs/app/getting-started/server-and-client-components#interleaving-server-and-client-components)。
+
+### 减小 JS 包体积
+
+要减小客户端 JavaScript 包的体积,应该给具体交互组件添加 `'use client'`,而不是把大块 UI 标记成客户端组件。
+
+例如,`<Layout>` 组件大部分是 logo、导航链接等静态元素,但包含一个交互式搜索栏。`<Search />` 需要是客户端组件,布局其余部分保持服务端组件即可。
+
+```tsx filename="app/layout.tsx" highlight={12} switcher
+// Client Component
+import Search from './search'
+// Server Component
+import Logo from './logo'
+
+// Layout is a Server Component by default
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <nav>
+        <Logo />
+        <Search />
+      </nav>
+      <main>{children}</main>
+    </>
+  )
+}
+```
+
+```jsx filename="app/layout.js" highlight={12} switcher
+// Client Component
+import Search from './search'
+// Server Component
+import Logo from './logo'
+
+// Layout is a Server Component by default
+export default function Layout({ children }) {
+  return (
+    <>
+      <nav>
+        <Logo />
+        <Search />
+      </nav>
+      <main>{children}</main>
+    </>
+  )
+}
+```
+
+```tsx filename="app/ui/search.tsx" highlight={1} switcher
+'use client'
+
+export default function Search() {
+  // ...
+}
+```
+
+```jsx filename="app/ui/search.js" highlight={1} switcher
+'use client'
+
+export default function Search() {
+  // ...
+}
+```
+
+### 从服务端组件向客户端组件传数据
+
+可以通过 props 把数据从服务端组件传给客户端组件。
+
+```tsx filename="app/[id]/page.tsx" highlight={1,12} switcher
+import LikeButton from '@/app/ui/like-button'
+import { getPost } from '@/lib/data'
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const post = await getPost(id)
+
+  return <LikeButton likes={post.likes} />
+}
+```
+
+```jsx filename="app/[id]/page.js" highlight={1,8} switcher
+import LikeButton from '@/app/ui/like-button'
+import { getPost } from '@/lib/data'
+
+export default async function Page({ params }) {
+  const { id } = await params
+  const post = await getPost(id)
+
+  return <LikeButton likes={post.likes} />
+}
+```
+
+```tsx filename="app/ui/like-button.tsx" highlight={1} switcher
+'use client'
+
+export default function LikeButton({ likes }: { likes: number }) {
+  // ...
+}
+```
+
+```jsx filename="app/ui/like-button.js" highlight={1} switcher
+'use client'
+
+export default function LikeButton({ likes }) {
+  // ...
+}
+```
+
+也可以用 [`use` API](https://react.dev/reference/react/use) 把数据从服务端组件流式传给客户端组件。见[示例](/docs/app/getting-started/fetching-data#streaming-data-with-the-use-api)。
+
+> **须知**:传给客户端组件的 props 必须是 React 可[序列化](https://react.dev/reference/react/use-server#serializable-parameters-and-return-values)的。
+
+### 交错使用服务端与客户端组件
+
+可以把服务端组件作为 prop 传给客户端组件,从而在视觉上把服务端渲染的 UI 嵌进客户端组件中。
+
+常见模式是在 `<ClientComponent>` 中用 `children` 开一个**插槽**。例如,`<Cart>` 组件在服务端取数,同时被包在使用客户端状态控制显隐的 `<Modal>` 组件里。
+
+```tsx filename="app/ui/modal.tsx" switcher
+'use client'
+
+export default function Modal({ children }: { children: React.ReactNode }) {
+  return <div>{children}</div>
+}
+```
+
+```jsx filename="app/ui/modal.js" switcher
+'use client'
+
+export default function Modal({ children }) {
+  return <div>{children}</div>
+}
+```
+
+然后,在父级服务端组件(如 `<Page>`)中,把 `<Cart>` 作为 `<Modal>` 的子内容传入:
+
+```tsx filename="app/page.tsx"  highlight={7} switcher
+import Modal from './ui/modal'
+import Cart from './ui/cart'
+
+export default function Page() {
+  return (
+    <Modal>
+      <Cart />
+    </Modal>
+  )
+}
+```
+
+```jsx filename="app/page.js" highlight={7} switcher
+import Modal from './ui/modal'
+import Cart from './ui/cart'
+
+export default function Page() {
+  return (
+    <Modal>
+      <Cart />
+    </Modal>
+  )
+}
+```
+
+在这种模式下,服务端组件总是提前在服务端渲染,即使它被当作 prop 传给了客户端组件。RSC Payload 中包含这些服务端组件的渲染结果,以及客户端组件的渲染占位符和其 JavaScript 文件的引用。
+
+### Context 提供者
+
+[React context](https://react.dev/learn/passing-data-deeply-with-context) 常用于共享全局状态(如当前主题)。但服务端组件不支持 React context。
+
+要使用 context,需要创建一个接受 `children` 的客户端组件:
+
+```tsx filename="app/theme-provider.tsx" switcher
+'use client'
+
+import { createContext } from 'react'
+
+export const ThemeContext = createContext({})
+
+export default function ThemeProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+}
+```
+
+```jsx filename="app/theme-provider.js" switcher
+'use client'
+
+import { createContext } from 'react'
+
+export const ThemeContext = createContext({})
+
+export default function ThemeProvider({ children }) {
+  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+}
+```
+
+然后,在服务端组件(如 `layout`)中导入它:
+
+```tsx filename="app/layout.tsx" switcher
+import ThemeProvider from './theme-provider'
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  )
+}
+```
+
+```jsx filename="app/layout.js" switcher
+import ThemeProvider from './theme-provider'
+
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  )
+}
+```
+
+这样,服务端组件就能直接渲染 provider,而应用中所有其他客户端组件都能消费这个 context。
+
+> **须知**:provider 应尽量渲染在树中更深的位置——注意 `ThemeProvider` 只包裹 `{children}`,而不是整个 `<html>` 文档。这让 Next.js 更容易优化服务端组件中的静态部分。
+
+要通过 context 传递服务端数据并在客户端组件中用 `use()` 读取,参见[在 Context Provider 中使用 React 的 `use`](/docs/app/guides/single-page-applications#using-reacts-use-within-a-context-provider)。
+
+### 第三方组件
+
+使用依赖客户端特性的第三方组件时,可以把它包进客户端组件,确保按预期工作。
+
+例如,`<Carousel />` 来自 `acme-carousel` 包。该组件内部用了 `useState`,但尚未带 `"use client"` 指令。
+
+如果在客户端组件里使用 `<Carousel />`,一切正常:
+
+```tsx filename="app/gallery.tsx" switcher
+'use client'
+
+import { useState } from 'react'
+import { Carousel } from 'acme-carousel'
+
+export default function Gallery() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <div>
+      <button onClick={() => setIsOpen(true)}>View pictures</button>
+      {/* Works, since Carousel is used within a Client Component */}
+      {isOpen && <Carousel />}
+    </div>
+  )
+}
+```
+
+```jsx filename="app/gallery.js" switcher
+'use client'
+
+import { useState } from 'react'
+import { Carousel } from 'acme-carousel'
+
+export default function Gallery() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <div>
+      <button onClick={() => setIsOpen(true)}>View pictures</button>
+      {/*  Works, since Carousel is used within a Client Component */}
+      {isOpen && <Carousel />}
+    </div>
+  )
+}
+```
+
+但如果直接在服务端组件中使用,会报错,因为 Next.js 不知道 `<Carousel />` 用到了客户端特性。
+
+解决办法:把依赖客户端特性的第三方组件包进你自己的客户端组件:
+
+```tsx filename="app/carousel.tsx" switcher
+'use client'
+
+import { Carousel } from 'acme-carousel'
+
+export default Carousel
+```
+
+```jsx filename="app/carousel.js" switcher
+'use client'
+
+import { Carousel } from 'acme-carousel'
+
+export default Carousel
+```
+
+现在,可以在服务端组件中直接使用 `<Carousel />`:
+
+```tsx filename="app/page.tsx" switcher
+import Carousel from './carousel'
+
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+      {/*  Works, since Carousel is a Client Component */}
+      <Carousel />
+    </div>
+  )
+}
+```
+
+```jsx filename="app/page.js" switcher
+import Carousel from './carousel'
+
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+      {/*  Works, since Carousel is a Client Component */}
+      <Carousel />
+    </div>
+  )
+}
+```
+
+> **给库作者的建议**
+>
+> 如果你在开发组件库,请给依赖客户端特性的入口文件加上 `"use client"` 指令。这样用户就能把组件导入服务端组件,无需再自己包一层。
+>
+> 值得注意的是,某些打包器可能会把 `"use client"` 指令剥离。如何配置 esbuild 以保留该指令,可参考 [React Wrap Balancer](https://github.com/shuding/react-wrap-balancer/blob/main/tsup.config.ts#L10-L13) 与 [Vercel Analytics](https://github.com/vercel/analytics/blob/main/packages/web/tsup.config.js#L26-L30) 仓库的示例。
+
+### 防止环境污染
+
+JavaScript 模块可以在服务端与客户端组件之间共享,这意味着可能不小心把仅服务端的代码导入客户端。比如下面这个函数:
+
+```ts filename="lib/data.ts" switcher
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+
+  return res.json()
+}
+```
+
+```js filename="lib/data.js" switcher
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+
+  return res.json()
+}
+```
+
+这个函数里包含绝不能暴露给客户端的 `API_KEY`。
+
+在 Next.js 中,只有以 `NEXT_PUBLIC_` 为前缀的环境变量才会进入客户端包。未加前缀的变量会被 Next.js 替换为空字符串。
+
+结果是,即使 `getData()` 可以在客户端被导入并执行,它也无法按预期工作。
+
+要防止在客户端组件中误用,可以使用 [`server-only` 包](https://www.npmjs.com/package/server-only)。
+
+然后,在包含仅服务端代码的文件中导入该包:
+
+```js filename="lib/data.js"
+import 'server-only'
+
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+
+  return res.json()
+}
+```
+
+现在,如果尝试把该模块导入客户端组件,构建时会直接报错。
+
+对应的 [`client-only` 包](https://www.npmjs.com/package/client-only)可用于标记仅客户端逻辑的模块,比如访问 `window` 对象的代码。
+
+在 Next.js 中,安装 `server-only` 或 `client-only` 是**可选的**。不过如果你的 lint 规则会标记无关依赖,可以安装它们以规避问题。
+
+```bash package="npm"
+npm install server-only
+```
+
+```bash package="yarn"
+yarn add server-only
+```
+
+```bash package="pnpm"
+pnpm add server-only
+```
+
+```bash package="bun"
+bun add server-only
+```
+
+Next.js 内部自行处理 `server-only` 与 `client-only` 导入,以便在模块被用于错误环境时给出更清晰的错误信息,并不使用 NPM 上这些包的实际内容。
+
+Next.js 还为 `server-only` 和 `client-only` 提供了自己的类型声明,适配启用了 [`noUncheckedSideEffectImports`](https://www.typescriptlang.org/tsconfig/#noUncheckedSideEffectImports) 的 TypeScript 配置。

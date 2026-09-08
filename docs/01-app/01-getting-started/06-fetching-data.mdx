@@ -1,0 +1,692 @@
+---
+title: 获取数据
+description: 学习如何获取数据,以及如何对依赖数据的内容进行流式传输。
+related:
+  title: 下一步
+  description: 进一步了解高级数据获取模式与本页提到的特性。
+  links:
+    - app/guides/single-page-applications
+    - app/guides/data-security
+    - app/api-reference/functions/fetch
+    - app/api-reference/file-conventions/loading
+    - app/api-reference/config/next-config-js/logging
+    - app/api-reference/config/next-config-js/taint
+---
+
+> 🌐 本文档由 [vercel/next.js](https://github.com/vercel/next.js) 翻译,英文原版见原项目。
+>
+> 注:本文件超过 10000 字符,按约定聚焦核心章节翻译;所有示例代码保持原样。
+
+本页将带你了解如何在[服务端组件](#server-components)和[客户端组件](#client-components)中获取数据,以及如何对依赖未缓存数据的组件进行[流式传输](#streaming)。
+
+## 获取数据
+
+### 服务端组件
+
+在服务端组件中,你可以使用任何异步 I/O 获取数据,例如:
+
+1. [`fetch` API](#with-the-fetch-api)
+2. [ORM 或数据库](#with-an-orm-or-database)
+
+#### 使用 `fetch` API
+
+用 `fetch` API 取数时,把组件写成异步函数并 await `fetch` 调用即可。例如:
+
+```tsx filename="app/blog/page.tsx" switcher
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog')
+  const posts = await data.json()
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog')
+  const posts = await data.json()
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+> **须知:**
+>
+> - React 组件树中完全相同的 `fetch` 请求默认会被[记忆化](/docs/app/glossary#memoization),因此你可以直接在需要数据的组件里取数,而不用层层传 props。
+> - `fetch` 请求默认不缓存,并且在请求完成前会阻塞页面渲染。可以使用 [`use cache`](/docs/app/api-reference/directives/use-cache) 指令缓存结果,或把取数组件包在 [`<Suspense>`](/docs/app/getting-started/caching#streaming-uncached-data) 里,在请求时流式返回新鲜数据。详见[缓存](/docs/app/getting-started/caching)。
+> - 开发期间,可以记录 `fetch` 调用日志以便调试。参见 [`logging` API 参考](/docs/app/api-reference/config/next-config-js/logging)。
+
+#### 使用 ORM 或数据库
+
+服务端组件在服务端渲染,凭据与查询逻辑不会进入客户端包,因此可以放心地用 ORM 或数据库客户端执行数据库查询。
+
+```tsx filename="app/blog/page.tsx" switcher
+import { db, posts } from '@/lib/db'
+
+export default async function Page() {
+  const allPosts = await db.select().from(posts)
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+import { db, posts } from '@/lib/db'
+
+export default async function Page() {
+  const allPosts = await db.select().from(posts)
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+你仍需确保请求经过正确的身份验证与授权。服务端数据访问的安全最佳实践参见[数据安全指南](/docs/app/guides/data-security)。
+
+### 流式传输
+
+在服务端组件中取数时,每次请求都会在服务端取数并渲染。如果某个数据请求很慢,整条路由都会被阻塞,直到所有数据取完。
+
+为了改善首屏加载时间和用户体验,你可以把页面拆成更小的**块(chunk)**,并把这些块从服务端渐进地发给客户端。这就是流式传输。深入了解流式传输的原理(包括 HTTP 约定、基础设施考量与性能取舍),参见[流式传输指南](/docs/app/guides/streaming)。
+
+<Image
+  alt="How Server Rendering with Streaming Works"
+  srcLight="/docs/light/server-rendering-with-streaming.png"
+  srcDark="/docs/dark/server-rendering-with-streaming.png"
+  width="1600"
+  height="785"
+/>
+
+在应用中使用流式传输有两种方式:
+
+1. 用 [`loading.js` 文件](#with-loadingjs)包裹页面
+2. 用 [`<Suspense>`](#with-suspense) 包裹组件
+
+> **须知:**机器人与爬虫的处理方式与浏览器不同。Next.js 会等数据获取完成、发送完整渲染的页面,而不是渐进式流式传输。参见[机器人与爬虫](/docs/app/guides/streaming#bots-and-crawlers)。
+
+#### 使用 `loading.js`
+
+在页面同级文件夹创建 `loading.js`,即可在取数期间对**整个页面**进行流式传输。例如要流式传输 `app/blog/page.js`,在 `app/blog` 文件夹内添加该文件。
+
+<Image
+  alt="Blog folder structure with loading.js file"
+  srcLight="/docs/light/loading-file.png"
+  srcDark="/docs/dark/loading-file.png"
+  width="1600"
+  height="525"
+/>
+
+```tsx filename="app/blog/loading.tsx" switcher
+export default function Loading() {
+  // Define the Loading UI here
+  return <div>Loading...</div>
+}
+```
+
+```jsx filename="app/blog/loading.js" switcher
+export default function Loading() {
+  // Define the Loading UI here
+  return <div>Loading...</div>
+}
+```
+
+导航时,页面渲染期间用户会立即看到布局和[加载状态](#creating-meaningful-loading-states),渲染完成后新内容会自动替换进来。
+
+<Image
+  alt="Loading UI"
+  srcLight="/docs/light/loading-ui.png"
+  srcDark="/docs/dark/loading-ui.png"
+  width="1600"
+  height="691"
+/>
+
+底层实现上,`loading.js` 会[嵌套在 `layout.js` 内部](/docs/app/getting-started/project-structure#component-hierarchy),并自动把 `page.js` 及其子内容包进 `<Suspense>` 边界。
+
+<Image
+  alt="loading.js overview"
+  srcLight="/docs/light/loading-overview.png"
+  srcDark="/docs/dark/loading-overview.png"
+  width="1600"
+  height="768"
+/>
+
+正因如此,访问了未缓存或运行时数据(如 `cookies()`、`headers()` 或未缓存 fetch)的布局,不会回退到同路由片段的 `loading.js`,而是阻塞导航直到布局渲染完成。[Cache Components](/docs/app/getting-started/caching) 会通过构建期报错引导你规避这一问题。
+
+要解决,可以把未缓存的数据访问包进独立的 [`<Suspense>`](#with-suspense) 边界并给出回退 UI,或者把取数移到 `loading.js` 能覆盖的 `page.js` 中。详见 [`loading.js`](/docs/app/api-reference/file-conventions/loading)。
+
+所以,`loading.js` 虽然适合对路由片段做流式传输,但我们更建议把 `<Suspense>` 放在离运行时或未缓存数据访问更近的位置。
+
+#### 使用 `<Suspense>`
+
+`<Suspense>` 让你对页面流式传输的粒度控制更精细。例如,可以立即展示 `<Suspense>` 边界之外的页面内容,边界内的博文列表则流式传入。
+
+```tsx filename="app/blog/page.tsx" switcher
+import { Suspense } from 'react'
+import BlogList from '@/components/BlogList'
+import BlogListSkeleton from '@/components/BlogListSkeleton'
+
+export default function BlogPage() {
+  return (
+    <div>
+      {/* This content will be sent to the client immediately */}
+      <header>
+        <h1>Welcome to the Blog</h1>
+        <p>Read the latest posts below.</p>
+      </header>
+      <main>
+        {/* If there's any dynamic content inside this boundary, it will be streamed in */}
+        <Suspense fallback={<BlogListSkeleton />}>
+          <BlogList />
+        </Suspense>
+      </main>
+    </div>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+import { Suspense } from 'react'
+import BlogList from '@/components/BlogList'
+import BlogListSkeleton from '@/components/BlogListSkeleton'
+
+export default function BlogPage() {
+  return (
+    <div>
+      {/* This content will be sent to the client immediately */}
+      <header>
+        <h1>Welcome to the Blog</h1>
+        <p>Read the latest posts below.</p>
+      </header>
+      <main>
+        {/* If there's any dynamic content inside this boundary, it will be streamed in */}
+        <Suspense fallback={<BlogListSkeleton />}>
+          <BlogList />
+        </Suspense>
+      </main>
+    </div>
+  )
+}
+```
+
+#### 设计有意义的加载状态
+
+即时加载状态是导航后立即展示的回退 UI。为了获得最佳用户体验,建议把加载状态设计得有意义,让用户感知到应用正在响应。例如可以用骨架屏和加载转圈,也可以用未来页面中一小块有意义的部分,如封面图、标题等。
+
+开发时可以用 [React Devtools](https://react.dev/learn/react-developer-tools) 预览和检查组件的加载状态。
+
+### 客户端组件
+
+在客户端组件中取数有两种方式:
+
+1. React 的 [`use` API](https://react.dev/reference/react/use)
+2. [SWR](https://swr.vercel.app/) 或 [React Query](https://tanstack.com/query/latest) 等社区库
+
+#### 用 `use` API 流式获取数据
+
+可以用 React 的 [`use` API](https://react.dev/reference/react/use) 把数据从服务端[流式](#streaming)传到客户端。先在服务端组件中取数,把 promise 作为 prop 传给客户端组件:
+
+```tsx filename="app/blog/page.tsx" switcher
+import Posts from '@/app/ui/posts'
+import { Suspense } from 'react'
+
+export default function Page() {
+  // Don't await the data fetching function
+  const posts = getPosts()
+
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <Posts posts={posts} />
+    </Suspense>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+import Posts from '@/app/ui/posts'
+import { Suspense } from 'react'
+
+export default function Page() {
+  // Don't await the data fetching function
+  const posts = getPosts()
+
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <Posts posts={posts} />
+    </Suspense>
+  )
+}
+```
+
+然后,在客户端组件中用 `use` API 读取该 promise:
+
+```tsx filename="app/ui/posts.tsx" switcher
+'use client'
+import { use } from 'react'
+
+export default function Posts({
+  posts,
+}: {
+  posts: Promise<{ id: string; title: string }[]>
+}) {
+  const allPosts = use(posts)
+
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/ui/posts.js" switcher
+'use client'
+import { use } from 'react'
+
+export default function Posts({ posts }) {
+  const allPosts = use(posts)
+
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+上例中,`<Posts>` 组件被包在 [`<Suspense>` 边界](https://react.dev/reference/react/Suspense)里,因此 promise 解析期间会展示回退 UI。进一步了解[流式传输](#streaming)。
+
+你可以在服务端用 `await` 解析 promise,也可以在客户端组件中用 `use()` 解析。React 对[在服务端或客户端组件中何时解析 Promise](https://react.dev/reference/react/use#resolve-promise-in-server-or-client-component) 有说明。如果要把同一个 promise 共享给多个客户端组件而不是层层传 props,可以通过 context 提供。参见[在 Context Provider 中使用 React 的 `use`](/docs/app/guides/single-page-applications#using-reacts-use-within-a-context-provider)。
+
+#### 社区库
+
+可以用 [SWR](https://swr.vercel.app/) 或 [React Query](https://tanstack.com/query/latest) 等社区库在客户端组件中取数。这些库对缓存、流式传输等特性有自己的语义。以 SWR 为例:
+
+```tsx filename="app/blog/page.tsx" switcher
+'use client'
+import useSWR from 'swr'
+
+const fetcher = (url) => fetch(url).then((r) => r.json())
+
+export default function BlogPage() {
+  const { data, error, isLoading } = useSWR(
+    'https://api.vercel.app/blog',
+    fetcher
+  )
+
+  if (isLoading) return <div>Loading...</div>
+  if (error) return <div>Error: {error.message}</div>
+
+  return (
+    <ul>
+      {data.map((post: { id: string; title: string }) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+'use client'
+
+import useSWR from 'swr'
+
+const fetcher = (url) => fetch(url).then((r) => r.json())
+
+export default function BlogPage() {
+  const { data, error, isLoading } = useSWR(
+    'https://api.vercel.app/blog',
+    fetcher
+  )
+
+  if (isLoading) return <div>Loading...</div>
+  if (error) return <div>Error: {error.message}</div>
+
+  return (
+    <ul>
+      {data.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+直接在浏览器取数、由服务端组件提供初始数据、把库缓存与 Next.js 服务端及客户端缓存协调使用等内容,参见[客户端数据获取](/docs/app/guides/client-side-data-fetching)。
+
+## 示例
+
+### 顺序数据获取
+
+顺序数据获取指一个请求依赖另一个请求的数据。
+
+例如,`<Playlists>` 必须等 `getArtist()` 解析后才能取数,因为它需要 `artistID`:
+
+```tsx filename="app/artist/[username]/page.tsx" switcher
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ username: string }>
+}) {
+  const { username } = await params
+  // Get artist information
+  const artist = await getArtist(username)
+
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      {/* Show fallback UI while the Playlists component is loading */}
+      <Suspense fallback={<div>Loading...</div>}>
+        {/* Pass the artist ID to the Playlists component */}
+        <Playlists artistID={artist.id} />
+      </Suspense>
+    </>
+  )
+}
+
+async function Playlists({ artistID }: { artistID: string }) {
+  // Use the artist ID to fetch playlists
+  const playlists = await getArtistPlaylists(artistID)
+
+  return (
+    <ul>
+      {playlists.map((playlist) => (
+        <li key={playlist.id}>{playlist.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/artist/[username]/page.js" switcher
+export default async function Page({ params }) {
+  const { username } = await params
+  // Get artist information
+  const artist = await getArtist(username)
+
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      {/* Show fallback UI while the Playlists component is loading */}
+      <Suspense fallback={<div>Loading...</div>}>
+        {/* Pass the artist ID to the Playlists component */}
+        <Playlists artistID={artist.id} />
+      </Suspense>
+    </>
+  )
+}
+
+async function Playlists({ artistID }) {
+  // Use the artist ID to fetch playlists
+  const playlists = await getArtistPlaylists(artistID)
+
+  return (
+    <ul>
+      {playlists.map((playlist) => (
+        <li key={playlist.id}>{playlist.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+这个例子中,`<Suspense>` 让播放列表在歌手数据加载完成后流式传入。但页面在展示任何内容之前仍要等歌手数据。要避免这一点,可以把整个页面组件包进 `<Suspense>` 边界(例如使用 [`loading.js` 文件](#with-loadingjs)),从而立即展示加载状态。
+
+请确保数据源能快速响应第一个请求,因为它会阻塞后续一切。如果该请求无法再优化,且数据变化不频繁,可以考虑[缓存](/docs/app/getting-started/caching)结果。
+
+### 并行数据获取
+
+并行数据获取指路由中的数据请求被急切发起、同时开始。
+
+默认情况下,[布局与页面](/docs/app/getting-started/layouts-and-pages)是并行渲染的,所以每个片段都会尽早开始取数。
+
+但在**任意**组件内部,多个 `async`/`await` 请求仍可能因先后排列而变成顺序执行。例如 `getAlbums` 会被阻塞,直到 `getArtist` 解析完成:
+
+```tsx filename="app/artist/[username]/page.tsx" switcher
+import { getArtist, getAlbums } from '@/app/lib/data'
+
+export default async function Page({ params }) {
+  // These requests will be sequential
+  const { username } = await params
+  const artist = await getArtist(username)
+  const albums = await getAlbums(username)
+  return <div>{artist.name}</div>
+}
+```
+
+可以先调用 `fetch` 发起多个请求,再用 [`Promise.all`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all) 一起 await。调用 `fetch` 的瞬间请求就已开始。
+
+```tsx filename="app/artist/[username]/page.tsx" highlight={3,8,24} switcher
+import Albums from './albums'
+
+async function getArtist(username: string) {
+  const res = await fetch(`https://api.example.com/artist/${username}`)
+  return res.json()
+}
+
+async function getAlbums(username: string) {
+  const res = await fetch(`https://api.example.com/artist/${username}/albums`)
+  return res.json()
+}
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ username: string }>
+}) {
+  const { username } = await params
+
+  // Initiate requests
+  const artistData = getArtist(username)
+  const albumsData = getAlbums(username)
+
+  const [artist, albums] = await Promise.all([artistData, albumsData])
+
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      <Albums list={albums} />
+    </>
+  )
+}
+```
+
+```jsx filename="app/artist/[username]/page.js" highlight={3,8,20} switcher
+import Albums from './albums'
+
+async function getArtist(username) {
+  const res = await fetch(`https://api.example.com/artist/${username}`)
+  return res.json()
+}
+
+async function getAlbums(username) {
+  const res = await fetch(`https://api.example.com/artist/${username}/albums`)
+  return res.json()
+}
+
+export default async function Page({ params }) {
+  const { username } = await params
+
+  // Initiate requests
+  const artistData = getArtist(username)
+  const albumsData = getAlbums(username)
+
+  const [artist, albums] = await Promise.all([artistData, albumsData])
+
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      <Albums list={albums} />
+    </>
+  )
+}
+```
+
+> **须知:**使用 `Promise.all` 时,任何一个请求失败都会导致整体失败。可以这样处理:改用 [`Promise.allSettled`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled) 方法。
+
+### 用 `React.cache` 复用数据
+
+对不使用 `fetch` 的数据访问(如 ORM 或数据库查询),可以把函数包进 [`React.cache`](https://react.dev/reference/react/cache)。这样多个组件可以在同一请求内调用该函数并共享同一份结果:
+
+```ts filename="app/lib/user.ts" switcher
+import { cache } from 'react'
+import { db, eq, users } from '@/lib/db'
+
+export const getUser = cache(async (id: string) => {
+  return db.query.users.findFirst({
+    where: eq(users.id, id),
+  })
+})
+```
+
+```js filename="app/lib/user.js" switcher
+import { cache } from 'react'
+import { db, eq, users } from '@/lib/db'
+
+export const getUser = cache(async (id) => {
+  return db.query.users.findFirst({
+    where: eq(users.id, id),
+  })
+})
+```
+
+服务端组件可以直接调用 `getUser()`:
+
+```tsx filename="app/dashboard/page.tsx" switcher
+import { getUser } from '../lib/user'
+
+export default async function DashboardPage() {
+  const user = await getUser('1')
+
+  if (!user) {
+    return null
+  }
+
+  return <h1>Dashboard for {user.name}</h1>
+}
+```
+
+```jsx filename="app/dashboard/page.js" switcher
+import { getUser } from '../lib/user'
+
+export default async function DashboardPage() {
+  const user = await getUser('1')
+
+  if (!user) {
+    return null
+  }
+
+  return <h1>Dashboard for {user.name}</h1>
+}
+```
+
+由于 `getUser` 被 `React.cache` 包裹,同一请求内以相同 `id` 进行的调用会返回同一份记忆化结果。
+
+> **须知:**[`React.cache`](https://react.dev/reference/react/cache#caveats) 只作用于当前请求。每个请求都有自己独立的记忆化作用域,请求之间不共享。
+
+### 预加载数据
+
+当组件要在其他阻塞工作之后才渲染时,它的数据请求会起步很晚,即使请求所需的输入早已就绪。预加载让请求更早启动,与其他工作并行执行,避免请求瀑布。
+
+预加载的做法:在阻塞工作之前调用取数函数但不 `await`,然后在消费结果的组件中再调用同一函数。
+
+取数函数必须对匹配的调用去重,组件才能复用预加载阶段启动的请求。可选方案:
+
+- 对 `fetch`,[完全相同的请求会自动记忆化](/docs/app/api-reference/functions/fetch#memoization)。
+- 对 ORM 或数据库,把取数函数包进 [`React.cache`](#reusing-data-with-reactcache)。
+- 使用 Cache Components 时,给取数函数加 [`'use cache'`](/docs/app/api-reference/directives/use-cache);如果函数读取 `cookies()`、`headers()` 等请求 API,使用 [`'use cache: private'`](/docs/app/api-reference/directives/use-cache-private)。
+
+在生产环境中,对私有缓存函数的匹配调用可以在一个请求内复用同一结果。这让组件能复用预加载阶段启动的请求,而无需把结果跨请求存进服务端缓存。
+
+预加载函数应与消费数据的组件放在一起,这样将来移动或删除组件时更容易发现依赖:
+
+```tsx filename="app/item/[id]/item.tsx" switcher
+async function getItem(id: string) {
+  const res = await fetch(`https://api.example.com/items/${id}`)
+  return res.json()
+}
+
+export const preload = (id: string) => {
+  void getItem(id)
+}
+
+export default async function Item({ id }: { id: string }) {
+  const item = await getItem(id)
+  return <div>{item.name}</div>
+}
+```
+
+```jsx filename="app/item/[id]/item.js" switcher
+async function getItem(id) {
+  const res = await fetch(`https://api.example.com/items/${id}`)
+  return res.json()
+}
+
+export const preload = (id) => {
+  void getItem(id)
+}
+
+export default async function Item({ id }) {
+  const item = await getItem(id)
+  return <div>{item.name}</div>
+}
+```
+
+在另一个阻塞请求之前调用 `preload()`,让商品数据更早开始加载:
+
+```tsx filename="app/item/[id]/page.tsx" switcher
+import Item, { preload } from './item'
+import { checkIsAvailable } from '@/app/lib/data'
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+
+  preload(id)
+  const isAvailable = await checkIsAvailable(id)
+
+  return isAvailable ? <Item id={id} /> : null
+}
+```
+
+```jsx filename="app/item/[id]/page.js" switcher
+import Item, { preload } from './item'
+import { checkIsAvailable } from '@/app/lib/data'
+
+export default async function Page({ params }) {
+  const { id } = await params
+
+  preload(id)
+  const isAvailable = await checkIsAvailable(id)
+
+  return isAvailable ? <Item id={id} /> : null
+}
+```
+
+`checkIsAvailable()` 执行期间,商品请求继续进行。如果页面渲染了 `<Item>`,完全相同的 `fetch` 调用会复用 `preload()` 启动的那个请求。
