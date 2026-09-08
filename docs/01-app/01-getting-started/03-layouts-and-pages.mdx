@@ -1,0 +1,364 @@
+---
+title: 布局与页面
+description: 学习如何创建你的第一个页面与布局,并使用 Link 组件在它们之间跳转。
+related:
+  title: API 参考
+  description: 通过阅读 API 参考,进一步了解本页提到的特性。
+  links:
+    - app/getting-started/linking-and-navigating
+    - app/api-reference/file-conventions/layout
+    - app/api-reference/file-conventions/page
+    - app/api-reference/components/link
+    - app/api-reference/file-conventions/dynamic-routes
+---
+
+> 🌐 本文档由 [vercel/next.js](https://github.com/vercel/next.js) 翻译,英文原版见原项目。
+
+Next.js 采用**基于文件系统的路由**,也就是说你可以用文件夹和文件来定义路由。本页将引导你创建布局与页面,并在它们之间建立链接。
+
+## 创建页面
+
+**页面(page)** 是在特定路由上渲染的 UI。创建页面的方式是:在 `app` 目录内添加一个 [`page` 文件](/docs/app/api-reference/file-conventions/page),并默认导出一个 React 组件。例如,创建一个索引页(`/`):
+
+<Image
+  alt="page.js special file"
+  srcLight="/docs/light/page-special-file.png"
+  srcDark="/docs/dark/page-special-file.png"
+  width="1600"
+  height="282"
+/>
+
+```tsx filename="app/page.tsx" switcher
+export default function Page() {
+  return <h1>Hello Next.js!</h1>
+}
+```
+
+```jsx filename="app/page.js" switcher
+export default function Page() {
+  return <h1>Hello Next.js!</h1>
+}
+```
+
+## 创建布局
+
+布局(layout)是多个页面之间**共享**的 UI。导航时,布局会保留状态、保持可交互,并且不会重新渲染。
+
+从一个 [`layout` 文件](/docs/app/api-reference/file-conventions/layout)默认导出 React 组件即可定义布局。该组件应接受一个 `children` 属性,children 可以是页面,也可以是另一个[布局](#nesting-layouts)。
+
+例如,创建一个接受索引页作为子内容的布局,在 `app` 目录内添加 `layout` 文件:
+
+<Image
+  alt="layout.js special file"
+  srcLight="/docs/light/layout-special-file.png"
+  srcDark="/docs/dark/layout-special-file.png"
+  width="1600"
+  height="363"
+/>
+
+```tsx filename="app/layout.tsx" switcher
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>
+        {/* Layout UI */}
+        {/* Place children where you want to render a page or nested layout */}
+        <main>{children}</main>
+      </body>
+    </html>
+  )
+}
+```
+
+```jsx filename="app/layout.js" switcher
+export default function DashboardLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        {/* Layout UI */}
+        {/* Place children where you want to render a page or nested layout */}
+        <main>{children}</main>
+      </body>
+    </html>
+  )
+}
+```
+
+上面的布局称为[根布局](/docs/app/api-reference/file-conventions/layout#root-layout),因为它定义在 `app` 目录的根上。根布局是**必需的**,且必须包含 `html` 和 `body` 标签。
+
+## 创建嵌套路由
+
+嵌套路由是由多个 URL 片段组成的路由。例如 `/blog/[slug]` 路由由三个片段组成:
+
+- `/`(根片段)
+- `blog`(片段)
+- `[slug]`(叶子片段)
+
+在 Next.js 中:
+
+- **文件夹**用于定义路由片段,映射到 URL 片段。
+- **文件**(如 `page` 和 `layout`)用于创建某个片段所展示的 UI。
+
+把文件夹逐层嵌套即可创建嵌套路由。例如,要为 `/blog` 添加路由,在 `app` 目录中创建名为 `blog` 的文件夹。然后,为了让 `/blog` 可公开访问,添加 `page.tsx` 文件:
+
+<Image
+  alt="File hierarchy showing blog folder and a page.js file"
+  srcLight="/docs/light/blog-nested-route.png"
+  srcDark="/docs/dark/blog-nested-route.png"
+  width="1600"
+  height="525"
+/>
+
+```tsx filename="app/blog/page.tsx" switcher
+// Dummy imports
+import { getPosts } from '@/lib/posts'
+import { Post } from '@/ui/post'
+
+export default async function Page() {
+  const posts = await getPosts()
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <Post key={post.id} post={post} />
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/blog/page.js" switcher
+// Dummy imports
+import { getPosts } from '@/lib/posts'
+import { Post } from '@/ui/post'
+
+export default async function Page() {
+  const posts = await getPosts()
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <Post key={post.id} post={post} />
+      ))}
+    </ul>
+  )
+}
+```
+
+可以继续嵌套文件夹来创建更深层的嵌套路由。例如,要为某篇博文创建路由,在 `blog` 里新建 `[slug]` 文件夹并添加 `page` 文件:
+
+<Image
+  alt="File hierarchy showing blog folder with a nested slug folder and a page.js file"
+  srcLight="/docs/light/blog-post-nested-route.png"
+  srcDark="/docs/dark/blog-post-nested-route.png"
+  width="1600"
+  height="687"
+/>
+
+```tsx filename="app/blog/[slug]/page.tsx" switcher
+export function generateStaticParams() {}
+
+export default function Page() {
+  return <h1>Hello, Blog Post Page!</h1>
+}
+```
+
+```jsx filename="app/blog/[slug]/page.js" switcher
+export function generateStaticParams() {}
+
+export default function Page() {
+  return <h1>Hello, Blog Post Page!</h1>
+}
+```
+
+用方括号包裹文件夹名(如 `[slug]`)即可创建[动态路由片段](/docs/app/api-reference/file-conventions/dynamic-routes),用于从数据生成多个页面,例如博文、商品页等。
+
+## 嵌套布局
+
+默认情况下,文件夹层级中的布局也会嵌套,即通过各自的 `children` 属性包裹子布局。在特定路由片段(文件夹)里添加 `layout` 即可实现布局嵌套。
+
+例如,要为 `/blog` 路由创建布局,在 `blog` 文件夹里添加新的 `layout` 文件。
+
+<Image
+  alt="File hierarchy showing root layout wrapping the blog layout"
+  srcLight="/docs/light/nested-layouts.png"
+  srcDark="/docs/dark/nested-layouts.png"
+  width="1600"
+  height="768"
+/>
+
+```tsx filename="app/blog/layout.tsx" switcher
+export default function BlogLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return <section>{children}</section>
+}
+```
+
+```jsx filename="app/blog/layout.js" switcher
+export default function BlogLayout({ children }) {
+  return <section>{children}</section>
+}
+```
+
+如果把上面两个布局组合起来,根布局(`app/layout.js`)会包裹博客布局(`app/blog/layout.js`),后者再包裹博客列表页(`app/blog/page.js`)与博文详情页(`app/blog/[slug]/page.js`)。
+
+## 创建动态片段
+
+[动态片段](/docs/app/api-reference/file-conventions/dynamic-routes)让你可以从数据生成路由。例如,不必为每篇博文手动建路由,而是创建一个动态片段,基于博文数据生成路由。
+
+创建动态片段的方法是用方括号包裹片段(文件夹)名:`[segmentName]`。例如在 `app/blog/[slug]/page.tsx` 路由中,`[slug]` 就是动态片段。
+
+```tsx filename="app/blog/[slug]/page.tsx" switcher
+export default async function BlogPostPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}) {
+  const { slug } = await params
+  const post = await getPost(slug)
+
+  return (
+    <div>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </div>
+  )
+}
+```
+
+```jsx filename="app/blog/[slug]/page.js" switcher
+export default async function BlogPostPage({ params }) {
+  const { slug } = await params
+  const post = await getPost(slug)
+
+  return (
+    <div>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </div>
+  )
+}
+```
+
+进一步了解[动态片段](/docs/app/api-reference/file-conventions/dynamic-routes)和 [`params`](/docs/app/api-reference/file-conventions/page#params-optional) 属性。
+
+嵌套在[动态片段内的布局](/docs/app/api-reference/file-conventions/layout#params-optional)同样可以访问 `params` 属性。
+
+## 使用 search params 渲染
+
+在服务端组件**页面**中,可以通过 [`searchParams`](/docs/app/api-reference/file-conventions/page#searchparams-optional) 属性访问查询参数:
+
+```tsx filename="app/page.tsx" switcher
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const filters = (await searchParams).filters
+}
+```
+
+```jsx filename="app/page.jsx" switcher
+export default async function Page({ searchParams }) {
+  const filters = (await searchParams).filters
+}
+```
+
+使用 `searchParams` 会让你的页面进入[**动态渲染**](/docs/app/glossary#dynamic-rendering),因为读取查询参数必须依赖传入的请求。
+
+客户端组件可以使用 [`useSearchParams`](/docs/app/api-reference/functions/use-search-params) hook 读取查询参数。
+
+进一步了解 `useSearchParams` 在[预渲染](/docs/app/api-reference/functions/use-search-params#prerendering)与[动态渲染](/docs/app/api-reference/functions/use-search-params#dynamic-rendering)路由中的行为。
+
+### 何时用哪个
+
+- 当你需要用查询参数**为页面加载数据**时(如分页、从数据库过滤),使用 `searchParams` 属性。
+- 当查询参数**只在客户端使用**时(如过滤一个已通过 props 加载的列表),使用 `useSearchParams`。
+- 一个小优化:在**回调或事件处理器**中可以用 `new URLSearchParams(window.location.search)` 读取查询参数,而不会触发重渲染。
+
+## 页面间跳转
+
+使用 [`<Link>` 组件](/docs/app/api-reference/components/link)在路由间导航。`<Link>` 是 Next.js 内置组件,对 HTML `<a>` 标签做了扩展,提供[预取](/docs/app/getting-started/linking-and-navigating#prefetching)与[客户端导航](/docs/app/getting-started/linking-and-navigating#client-side-transitions)能力。
+
+例如,要生成博文列表,从 `next/link` 导入 `<Link>` 并传入 `href` 属性:
+
+```tsx filename="app/ui/post.tsx" highlight={1,2,11} switcher
+import Link from 'next/link'
+import { getPosts } from '@/lib/posts'
+
+export default async function Posts() {
+  const posts = await getPosts()
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.slug}>
+          <Link href={`/blog/${post.slug}`}>{post.title}</Link>
+        </li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```jsx filename="app/ui/post.js" highlight={1,2,11} switcher
+import Link from 'next/link'
+import { getPosts } from '@/lib/posts'
+
+export default async function Posts() {
+  const posts = await getPosts()
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.slug}>
+          <Link href={`/blog/${post.slug}`}>{post.title}</Link>
+        </li>
+      ))}
+    </ul>
+  )
+}
+```
+
+> **须知**:`<Link>` 是 Next.js 中路由间导航的主要方式。更高级的导航场景可以使用 [`useRouter` hook](/docs/app/api-reference/functions/use-router)。
+
+## 路由 Props 辅助类型
+
+Next.js 提供了一批工具类型,可从你的路由结构推断 `params` 和命名插槽:
+
+- [**PageProps**](/docs/app/api-reference/file-conventions/page#page-props-helper):`page` 组件的 Props,包含 `params` 与 `searchParams`。
+- [**LayoutProps**](/docs/app/api-reference/file-conventions/layout#layout-props-helper):`layout` 组件的 Props,包含 `children` 与所有命名插槽(如 `@analytics` 这类文件夹)。
+
+这些是全局可用的辅助类型,在运行 `next dev`、`next build` 或 [`next typegen`](/docs/app/api-reference/cli/next#next-typegen-options) 时生成。
+
+```tsx filename="app/blog/[slug]/page.tsx"
+export default async function Page(props: PageProps<'/blog/[slug]'>) {
+  const { slug } = await props.params
+  return <h1>Blog post: {slug}</h1>
+}
+```
+
+```tsx filename="app/dashboard/layout.tsx"
+export default function Layout(props: LayoutProps<'/dashboard'>) {
+  return (
+    <section>
+      {props.children}
+      {/* If you have app/dashboard/@analytics, it appears as a typed slot: */}
+      {/* {props.analytics} */}
+    </section>
+  )
+}
+```
+
+> **须知**
+>
+> - 静态路由的 `params` 解析为 `{}`。
+> - `PageProps`、`LayoutProps` 是全局辅助类型——无需导入。
+> - 类型在 `next dev`、`next build` 或 `next typegen` 运行期间生成。
